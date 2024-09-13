@@ -4,7 +4,7 @@ const WebSocket = require("ws");
 const fs = require("fs");
 const firebase = require("firebase-admin");
 const cron = require("node-cron");
-const multer = require("multer"); // Dùng để xử lý upload file
+const ffmpeg = require("fluent-ffmpeg"); // Thêm ffmpeg để xử lý video
 
 const app = express();
 
@@ -18,7 +18,7 @@ const wsServer = new WebSocket.Server({ port: WS_PORT }, () =>
 // Initialize Firebase
 firebase.initializeApp({
   credential: firebase.credential.cert(
-    require("./key.json") // Ensure this path is relative to your project folder
+    require("./key.json") // Đảm bảo đường dẫn đúng tới key Firebase
   ),
   storageBucket: "esp32cam-4dbf9.appspot.com",
 });
@@ -33,7 +33,7 @@ function createDirectory(dir) {
   }
 }
 
-// WebSocket handling video streaming
+// WebSocket xử lý streaming video
 wsServer.on("connection", (ws, req) => {
   console.log("Connected");
   connectedClients.push(ws);
@@ -43,16 +43,18 @@ wsServer.on("connection", (ws, req) => {
       if (ws.readyState === ws.OPEN) {
         ws.send(data);
 
-        // Create a unique folder based on timestamp
+        // Tạo một thư mục dựa trên timestamp để lưu trữ video
         const folderName = `video_${Date.now()}`;
         const folderPath = path.join(__dirname, folderName);
 
-        // Create directory for the current stream
+        // Tạo thư mục cho luồng stream hiện tại
         createDirectory(folderPath);
 
-        // Write the video stream to a new file inside the unique folder
+        // Ghi dữ liệu stream vào file mới trong thư mục
         const videoFilePath = path.join(folderPath, `video_stream.mp4`);
-        fs.appendFileSync(videoFilePath, data);
+        const writeStream = fs.createWriteStream(videoFilePath, { flags: "a" });
+        writeStream.write(data);
+        writeStream.end();
       } else {
         connectedClients.splice(i, 1);
       }
@@ -68,11 +70,11 @@ app.listen(HTTP_PORT, () =>
   console.log(`HTTP server listening at ${HTTP_PORT}`)
 );
 
-// Schedule to upload the video to Firebase every minute and delete the old folder
+// Định kỳ upload video lên Firebase và xóa thư mục cũ
 cron.schedule("*/1 * * * *", () => {
   console.log("Uploading video to Firebase...");
 
-  // Scan for folders that store video files
+  // Tìm các thư mục chứa video
   fs.readdir(__dirname, (err, folders) => {
     if (err) {
       console.error("Error reading directories:", err);
@@ -82,37 +84,52 @@ cron.schedule("*/1 * * * *", () => {
     folders.forEach((folder) => {
       const folderPath = path.join(__dirname, folder);
 
-      // Check if it's a folder and contains video files
+      // Kiểm tra xem đây có phải là thư mục chứa video không
       if (fs.statSync(folderPath).isDirectory()) {
         const videoFile = path.join(folderPath, "video_stream.mp4");
 
-        // Check if the video file exists in the folder
+        // Kiểm tra xem file video có tồn tại không
         if (fs.existsSync(videoFile)) {
-          const blob = bucket.file(`videos/${folder}_${Date.now()}.mp4`);
-          const blobStream = blob.createWriteStream({
-            metadata: {
-              contentType: "video/mp4",
-            },
-          });
+          // Xử lý video qua ffmpeg để đảm bảo video hợp lệ
+          const processedFile = path.join(folderPath, `processed_video.mp4`);
+          ffmpeg(videoFile)
+            .output(processedFile)
+            .on("end", function () {
+              console.log("File processed successfully, ready for upload.");
 
-          // Upload video to Firebase
-          fs.createReadStream(videoFile)
-            .pipe(blobStream)
-            .on("error", (err) => {
-              console.log("Error uploading video:", err);
-            })
-            .on("finish", () => {
-              console.log(`Video from folder ${folder} uploaded successfully`);
-
-              // Delete the folder after upload
-              fs.rmdir(folderPath, { recursive: true }, (err) => {
-                if (err) {
-                  console.error("Error deleting folder:", err);
-                } else {
-                  console.log(`Folder ${folder} deleted after upload.`);
-                }
+              // Upload video đã xử lý lên Firebase
+              const blob = bucket.file(`videos/${folder}_${Date.now()}.mp4`);
+              const blobStream = blob.createWriteStream({
+                metadata: {
+                  contentType: "video/mp4",
+                },
               });
-            });
+
+              // Đọc file đã xử lý và upload lên Firebase
+              fs.createReadStream(processedFile)
+                .pipe(blobStream)
+                .on("error", (err) => {
+                  console.log("Error uploading video:", err);
+                })
+                .on("finish", () => {
+                  console.log(
+                    `Video from folder ${folder} uploaded successfully`
+                  );
+
+                  // Xóa thư mục sau khi upload
+                  fs.rmdir(folderPath, { recursive: true }, (err) => {
+                    if (err) {
+                      console.error("Error deleting folder:", err);
+                    } else {
+                      console.log(`Folder ${folder} deleted after upload.`);
+                    }
+                  });
+                });
+            })
+            .on("error", function (err) {
+              console.log("Error processing video with ffmpeg:", err.message);
+            })
+            .run(); // Bắt đầu xử lý video bằng ffmpeg
         }
       }
     });
