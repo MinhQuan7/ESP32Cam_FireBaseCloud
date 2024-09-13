@@ -38,27 +38,40 @@ wsServer.on("connection", (ws, req) => {
   console.log("Connected");
   connectedClients.push(ws);
 
+  // Tạo một thư mục dựa trên timestamp để lưu trữ video
+  const folderName = `video_${Date.now()}`;
+  const folderPath = path.join(__dirname, folderName);
+
+  // Tạo thư mục cho luồng stream hiện tại
+  createDirectory(folderPath);
+
+  const videoFilePath = path.join(folderPath, `video_stream.mp4`);
+  const writeStream = fs.createWriteStream(videoFilePath, { flags: "a" });
+
   ws.on("message", (data) => {
-    connectedClients.forEach((ws, i) => {
-      if (ws.readyState === ws.OPEN) {
-        ws.send(data);
+    // Kiểm tra nếu dữ liệu là binary
+    if (Buffer.isBuffer(data)) {
+      connectedClients.forEach((ws, i) => {
+        if (ws.readyState === ws.OPEN) {
+          ws.send(data); // Gửi dữ liệu tới tất cả các clients
 
-        // Tạo một thư mục dựa trên timestamp để lưu trữ video
-        const folderName = `video_${Date.now()}`;
-        const folderPath = path.join(__dirname, folderName);
+          // Ghi dữ liệu stream vào file
+          writeStream.write(data);
+        } else {
+          connectedClients.splice(i, 1);
+        }
+      });
+    } else {
+      console.error("Received non-binary data, discarding...");
+    }
+  });
 
-        // Tạo thư mục cho luồng stream hiện tại
-        createDirectory(folderPath);
+  ws.on("close", () => {
+    writeStream.end(); // Kết thúc ghi file khi kết nối WebSocket đóng
+  });
 
-        // Ghi dữ liệu stream vào file mới trong thư mục
-        const videoFilePath = path.join(folderPath, `video_stream.mp4`);
-        const writeStream = fs.createWriteStream(videoFilePath, { flags: "a" });
-        writeStream.write(data);
-        writeStream.end();
-      } else {
-        connectedClients.splice(i, 1);
-      }
-    });
+  ws.on("error", (error) => {
+    console.error(`WebSocket error: ${error.message}`);
   });
 });
 
@@ -70,7 +83,7 @@ app.listen(HTTP_PORT, () =>
   console.log(`HTTP server listening at ${HTTP_PORT}`)
 );
 
-// Định kỳ upload video lên Firebase và xóa thư mục cũ
+// Định kỳ upload video lên Firebase và xóa thư mục cũ sau 1 phút
 cron.schedule("*/1 * * * *", () => {
   console.log("Uploading video to Firebase...");
 
