@@ -4,13 +4,16 @@ const WebSocket = require("ws");
 const fs = require("fs");
 const firebase = require("firebase-admin");
 const cron = require("node-cron");
-const ffmpeg = require("fluent-ffmpeg"); // Thêm ffmpeg để xử lý video
+const ffmpeg = require("fluent-ffmpeg");
+
+const ffmpegPath =
+  "C:/Users/QuanLe/ffmpeg-7.0.2-essentials_build/bin/ffmpeg.exe"; // Thay đường dẫn này thành đường dẫn tới ffmpeg trên hệ thống của bạn
+ffmpeg.setFfmpegPath(ffmpegPath); // Cấu hình đường dẫn ffmpeg
 
 const app = express();
 
 const WS_PORT = 8888;
 const HTTP_PORT = 8000;
-
 
 const wsServer = new WebSocket.Server({ port: WS_PORT }, () =>
   console.log(`WS Server is listening at ${WS_PORT}`)
@@ -26,6 +29,8 @@ firebase.initializeApp({
 const bucket = firebase.storage().bucket();
 
 let connectedClients = [];
+let currentFolderName = ""; // Folder hiện tại để lưu video
+let isUploading = false; // Kiểm tra trạng thái upload
 
 // Function to create a unique directory
 function createDirectory(dir) {
@@ -34,45 +39,44 @@ function createDirectory(dir) {
   }
 }
 
+// Function to generate a new folder name
+function generateNewFolder() {
+  return `video_${Date.now()}`;
+}
+
 // WebSocket xử lý streaming video
 wsServer.on("connection", (ws, req) => {
   console.log("Connected");
+  ws.binaryType = "arraybuffer";
   connectedClients.push(ws);
 
-  // Tạo một thư mục dựa trên timestamp để lưu trữ video
-  const folderName = `video_${Date.now()}`;
-  const folderPath = path.join(__dirname, folderName);
-
-  // Tạo thư mục cho luồng stream hiện tại
-  createDirectory(folderPath);
-
-  const videoFilePath = path.join(folderPath, `video_stream.mp4`);
-  const writeStream = fs.createWriteStream(videoFilePath, { flags: "a" });
+  if (!currentFolderName) {
+    // Tạo folder mới nếu chưa có
+    currentFolderName = generateNewFolder();
+    createDirectory(path.join(__dirname, currentFolderName));
+  }
 
   ws.on("message", (data) => {
-    // Kiểm tra nếu dữ liệu là binary
-    if (Buffer.isBuffer(data)) {
-      connectedClients.forEach((ws, i) => {
-        if (ws.readyState === ws.OPEN) {
-          ws.send(data); // Gửi dữ liệu tới tất cả các clients
+    connectedClients.forEach((ws, i) => {
+      if (ws.readyState === ws.OPEN) {
+        ws.send(data);
 
-          // Ghi dữ liệu stream vào file
-          writeStream.write(data);
-        } else {
-          connectedClients.splice(i, 1);
-        }
-      });
-    } else {
-      console.error("Received non-binary data, discarding...");
-    }
-  });
+        // Chuyển đổi ArrayBuffer thành Buffer
+        const bufferData = Buffer.from(data);
 
-  ws.on("close", () => {
-    writeStream.end(); // Kết thúc ghi file khi kết nối WebSocket đóng
-  });
-
-  ws.on("error", (error) => {
-    console.error(`WebSocket error: ${error.message}`);
+        // Ghi dữ liệu stream vào file mới trong thư mục
+        const videoFilePath = path.join(
+          __dirname,
+          currentFolderName,
+          `video_stream.mp4`
+        );
+        const writeStream = fs.createWriteStream(videoFilePath, { flags: "a" });
+        writeStream.write(bufferData);
+        writeStream.end();
+      } else {
+        connectedClients.splice(i, 1);
+      }
+    });
   });
 });
 
@@ -84,68 +88,72 @@ app.listen(HTTP_PORT, () =>
   console.log(`HTTP server listening at ${HTTP_PORT}`)
 );
 
-// Định kỳ upload video lên Firebase và xóa thư mục cũ sau 1 phút
-cron.schedule("*/1 * * * *", () => {
-  console.log("Uploading video to Firebase...");
+// Function to handle the upload and deletion process
+function handleUploadAndDeletion() {
+  if (isUploading || !currentFolderName) return; // Kiểm tra nếu đang upload hoặc chưa có folder
 
-  // Tìm các thư mục chứa video
-  fs.readdir(__dirname, (err, folders) => {
-    if (err) {
-      console.error("Error reading directories:", err);
-      return;
-    }
+  const folderPath = path.join(__dirname, currentFolderName);
+  const videoFile = path.join(folderPath, "video_stream.mp4");
 
-    folders.forEach((folder) => {
-      const folderPath = path.join(__dirname, folder);
+  // Kiểm tra xem file video có tồn tại không
+  if (fs.existsSync(videoFile)) {
+    isUploading = true; // Đặt trạng thái upload là true
 
-      // Kiểm tra xem đây có phải là thư mục chứa video không
-      if (fs.statSync(folderPath).isDirectory()) {
-        const videoFile = path.join(folderPath, "video_stream.mp4");
+    // Xử lý video qua ffmpeg để đảm bảo video hợp lệ
+    const processedFile = path.join(folderPath, `processed_video.mp4`);
+    ffmpeg(videoFile)
+      .output(processedFile)
+      .on("end", function () {
+        console.log("File processed successfully, ready for upload.");
 
-        // Kiểm tra xem file video có tồn tại không
-        if (fs.existsSync(videoFile)) {
-          // Xử lý video qua ffmpeg để đảm bảo video hợp lệ
-          const processedFile = path.join(folderPath, `processed_video.mp4`);
-          ffmpeg(videoFile)
-            .output(processedFile)
-            .on("end", function () {
-              console.log("File processed successfully, ready for upload.");
+        // Upload video đã xử lý lên Firebase
+        const blob = bucket.file(
+          `videos/${currentFolderName}_${Date.now()}.mp4`
+        );
+        const blobStream = blob.createWriteStream({
+          metadata: {
+            contentType: "video/mp4",
+          },
+        });
 
-              // Upload video đã xử lý lên Firebase
-              const blob = bucket.file(`videos/${folder}_${Date.now()}.mp4`);
-              const blobStream = blob.createWriteStream({
-                metadata: {
-                  contentType: "video/mp4",
-                },
-              });
+        // Đọc file đã xử lý và upload lên Firebase
+        fs.createReadStream(processedFile)
+          .pipe(blobStream)
+          .on("error", (err) => {
+            console.log("Error uploading video:", err);
+            isUploading = false; // Đặt lại trạng thái
+          })
+          .on("finish", () => {
+            console.log(
+              `Video from folder ${currentFolderName} uploaded successfully`
+            );
 
-              // Đọc file đã xử lý và upload lên Firebase
-              fs.createReadStream(processedFile)
-                .pipe(blobStream)
-                .on("error", (err) => {
-                  console.log("Error uploading video:", err);
-                })
-                .on("finish", () => {
-                  console.log(
-                    `Video from folder ${folder} uploaded successfully`
-                  );
+            // Xóa thư mục sau khi upload
+            fs.rm(folderPath, { recursive: true }, (err) => {
+              if (err) {
+                console.error("Error deleting folder:", err);
+              } else {
+                console.log(
+                  `Folder ${currentFolderName} deleted after upload.`
+                );
+              }
 
-                  // Xóa thư mục sau khi upload
-                  fs.rmdir(folderPath, { recursive: true }, (err) => {
-                    if (err) {
-                      console.error("Error deleting folder:", err);
-                    } else {
-                      console.log(`Folder ${folder} deleted after upload.`);
-                    }
-                  });
-                });
-            })
-            .on("error", function (err) {
-              console.log("Error processing video with ffmpeg:", err.message);
-            })
-            .run(); // Bắt đầu xử lý video bằng ffmpeg
-        }
-      }
-    });
-  });
+              // Đặt lại biến currentFolderName để tạo folder mới cho lần streaming tiếp theo
+              currentFolderName = "";
+              isUploading = false;
+            });
+          });
+      })
+      .on("error", function (err) {
+        console.log("Error processing video with ffmpeg:", err.message);
+        isUploading = false; // Đặt lại trạng thái
+      })
+      .run(); // Bắt đầu xử lý video bằng ffmpeg
+  }
+}
+
+// Sử dụng cron để chạy upload và xoá thư mục mỗi phút
+cron.schedule("*/5 * * * *", () => {
+  console.log("Checking for video upload...");
+  handleUploadAndDeletion();
 });
