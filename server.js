@@ -88,8 +88,8 @@ app.listen(HTTP_PORT, () =>
   console.log(`HTTP server listening at ${HTTP_PORT}`)
 );
 
-// Function to handle the upload and deletion process
-function handleUploadAndDeletion() {
+// Function to handle the upload process (Every 1 minute)
+function handleUpload() {
   if (isUploading || !currentFolderName) return; // Kiểm tra nếu đang upload hoặc chưa có folder
 
   const folderPath = path.join(__dirname, currentFolderName);
@@ -127,21 +127,7 @@ function handleUploadAndDeletion() {
             console.log(
               `Video from folder ${currentFolderName} uploaded successfully`
             );
-
-            // Xóa thư mục sau khi upload
-            fs.rm(folderPath, { recursive: true }, (err) => {
-              if (err) {
-                console.error("Error deleting folder:", err);
-              } else {
-                console.log(
-                  `Folder ${currentFolderName} deleted after upload.`
-                );
-              }
-
-              // Đặt lại biến currentFolderName để tạo folder mới cho lần streaming tiếp theo
-              currentFolderName = "";
-              isUploading = false;
-            });
+            isUploading = false;
           });
       })
       .on("error", function (err) {
@@ -152,8 +138,46 @@ function handleUploadAndDeletion() {
   }
 }
 
-// Sử dụng cron để chạy upload và xoá thư mục mỗi phút
-cron.schedule("*/2 * * * *", () => {
+// Function to handle the deletion of the oldest folder (Every 10 minutes)
+function handleDeleteOldestFolder() {
+  fs.readdir(__dirname, (err, folders) => {
+    if (err) {
+      console.error("Error reading directories:", err);
+      return;
+    }
+
+    // Lọc chỉ các thư mục chứa video
+    const videoFolders = folders.filter((folder) =>
+      folder.startsWith("video_")
+    );
+
+    if (videoFolders.length > 0) {
+      // Sắp xếp thư mục theo thời gian tạo (cũ nhất trước)
+      const oldestFolder = videoFolders.sort()[0];
+      const folderPath = path.join(__dirname, oldestFolder);
+
+      // Xóa thư mục cũ nhất
+      fs.rm(folderPath, { recursive: true }, (err) => {
+        if (err) {
+          console.error("Error deleting folder:", err);
+        } else {
+          console.log(`Oldest folder ${oldestFolder} deleted.`);
+        }
+      });
+    } else {
+      console.log("No video folders to delete.");
+    }
+  });
+}
+
+// Sử dụng cron để chạy upload mỗi 1 phút
+cron.schedule("*/1 * * * *", () => {
   console.log("Checking for video upload...");
-  handleUploadAndDeletion();
+  handleUpload();
+});
+
+// Sử dụng cron để chạy xóa thư mục cũ nhất mỗi 10 phút
+cron.schedule("*/10 * * * *", () => {
+  console.log("Checking for folder deletion...");
+  handleDeleteOldestFolder();
 });
