@@ -153,7 +153,7 @@ function handleUploadAndDeletion() {
 }
 
 // Sử dụng cron để chạy upload và xoá thư mục mỗi phút
-cron.schedule("*/1 * * * *", () => {
+cron.schedule("*/2 * * * *", () => {
   console.log("Checking for video upload...");
   handleUploadAndDeletion();
 });

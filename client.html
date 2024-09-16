@@ -1,15 +1,41 @@
 <html>
   <head>
     <title>Client</title>
+    <style>
+      #datetime {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: white;
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 5px;
+        font-family: Arial, sans-serif;
+        font-size: 14px;
+      }
+
+      img {
+        width: 100%;
+        height: auto;
+      }
+
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
   </head>
   <body>
+    <div id="datetime"></div>
     <img src="" />
     <script>
       const img = document.querySelector("img");
-      const WS_URL = "ws:///192.168.1.42:8888";
+      const datetime = document.getElementById("datetime");
+      const WS_URL = "ws://192.168.1.42:8888";
       const ws = new WebSocket(WS_URL);
       let urlObject;
+
       ws.onopen = () => console.log(`Connected to ${WS_URL}`);
+
       ws.onmessage = (message) => {
         const arrayBuffer = message.data;
         if (urlObject) {
@@ -18,6 +44,26 @@
         urlObject = URL.createObjectURL(new Blob([arrayBuffer]));
         img.src = urlObject;
       };
+
+      // Function to update the date and time every second
+      function updateDateTime() {
+        const now = new Date();
+        const options = {
+          timeZone: "Asia/Ho_Chi_Minh",
+          weekday: "short",
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        };
+        const formattedDateTime = now.toLocaleString("en-US", options);
+        datetime.textContent = formattedDateTime;
+      }
+
+      // Update the date and time every second
+      setInterval(updateDateTime, 1000);
     </script>
   </body>
 </html>
