@@ -170,6 +170,8 @@ function handleDeleteOldestFolder() {
   });
 }
 
+
+
 // Sử dụng cron để chạy upload mỗi 1 phút
 cron.schedule("*/1 * * * *", () => {
   console.log("Checking for video upload...");
