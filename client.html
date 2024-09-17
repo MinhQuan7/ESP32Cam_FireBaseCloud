@@ -1,6 +1,12 @@
 <html>
   <head>
     <title>Client</title>
+<<<<<<< HEAD
+=======
+    <head>
+      <h1>Video Streaming : ESP32Camera</h1>
+    </head>
+>>>>>>> f1aae78 (Upgrade with press button from user)
     <style>
       #datetime {
         position: absolute;
@@ -10,7 +16,11 @@
         background-color: rgba(0, 0, 0, 0.5);
         padding: 5px;
         font-family: Arial, sans-serif;
-        font-size: 14px;
+        font-size: 14px;1
+<<<<<<< HEAD
+=======
+        margin-top: 50px;
+>>>>>>> f1aae78 (Upgrade with press button from user)
       }
 
       img {
@@ -30,7 +40,13 @@
     <script>
       const img = document.querySelector("img");
       const datetime = document.getElementById("datetime");
+<<<<<<< HEAD
       const WS_URL = "ws://192.168.1.16:8888";
+=======
+
+      //_______________________Must change________________________
+      const WS_URL = "ws://192.168.137.147:8888"; //must change
+>>>>>>> f1aae78 (Upgrade with press button from user)
       const ws = new WebSocket(WS_URL);
       let urlObject;
 
@@ -65,5 +81,50 @@
       // Update the date and time every second
       setInterval(updateDateTime, 1000);
     </script>
+<<<<<<< HEAD
+=======
+
+  
+    <script src="https://www.unpkg.com/@eohjsc/era-widget@1.1.3/src/index.js"></script>
+    <script>
+
+      //____________________E-Ra Configurations__________________________
+      let lastextractVideos = null;
+      const eraWidget = new EraWidget();
+      let config = { id: 51152 }; //Change id with each widget
+      let extractVideoValue = null;
+
+      eraWidget.onConfiguration((configuration) => {
+        console.log("Full configuration received:", configuration);
+        console.log(
+          "Using configuration for extractVideoValue with ID:",
+          config.id
+        );
+      });
+
+      eraWidget.onValues((values) => {
+        console.log("Received values:", values);
+        if (values[config.id]) {
+          extractVideoValue = values[config.id].value;
+          console.log("Received extractVideoValue:", extractVideoValue);
+
+          if (extractVideoValue === 0 && lastextractVideos !== 0) {
+            console.log("Request extract videos. Loading...");
+
+            //_________________________________________________________________
+            //______________Supply videos from streaming Websocket_____________________
+          }
+
+          lastextractVideos = extractVideoValue;
+        } else {
+          console.log(
+            "No valid values received for extractVideoValue with ID:",
+            config.id
+          );
+        }
+      });
+      eraWidget.ready();
+    </script>
+>>>>>>> f1aae78 (Upgrade with press button from user)
   </body>
 </html>
