@@ -6,12 +6,7 @@ const firebase = require("firebase-admin");
 const cron = require("node-cron");
 const ffmpeg = require("fluent-ffmpeg");
 
-<<<<<<< HEAD
-const ffmpegPath =
-  "C:/Users/QuanLe/ffmpeg-7.0.2-essentials_build/bin/ffmpeg.exe"; // Thay đường dẫn này thành đường dẫn tới ffmpeg trên hệ thống của bạn
-=======
 const ffmpegPath = "C:/Users/QuanLe/ffmpeg-7.0.2-essentials_build/bin/ffmpeg.exe"; // Đường dẫn tới ffmpeg
->>>>>>> f1aae78 (Upgrade with press button from user)
 ffmpeg.setFfmpegPath(ffmpegPath); // Cấu hình đường dẫn ffmpeg
 
 const app = express();
@@ -25,13 +20,7 @@ const wsServer = new WebSocket.Server({ port: WS_PORT }, () =>
 
 // Initialize Firebase
 firebase.initializeApp({
-<<<<<<< HEAD
-  credential: firebase.credential.cert(
-    require("./key.json") // Đảm bảo đường dẫn đúng tới key Firebase
-  ),
-=======
   credential: firebase.credential.cert(require("./key.json")), // Đảm bảo đường dẫn đúng tới key Firebase
->>>>>>> f1aae78 (Upgrade with press button from user)
   storageBucket: "esp32cam-4dbf9.appspot.com",
 });
 const bucket = firebase.storage().bucket();
@@ -39,13 +28,10 @@ const bucket = firebase.storage().bucket();
 let connectedClients = [];
 let currentFolderName = ""; // Folder hiện tại để lưu video
 let isUploading = false; // Kiểm tra trạng thái upload
-<<<<<<< HEAD
-=======
 let recordingTimeout = null; // Để kiểm soát thời gian ghi
 let videoBuffer = []; // Buffer để lưu dữ liệu video (dùng để trích xuất)
 const bufferLimit = 10 * 30; // Giới hạn buffer lưu 10 giây (30 frames/giây)
 let isEmergency = false; // Biến đánh dấu khi có yêu cầu khẩn cấp
->>>>>>> f1aae78 (Upgrade with press button from user)
 
 // Function to create a unique directory
 function createDirectory(dir) {
@@ -59,8 +45,6 @@ function generateNewFolder() {
   return `video_${Date.now()}`;
 }
 
-<<<<<<< HEAD
-=======
 // Start recording video
 function startRecording() {
   currentFolderName = generateNewFolder();
@@ -83,22 +67,12 @@ function stopRecording() {
   handleUploadAndDeletion();
 }
 
->>>>>>> f1aae78 (Upgrade with press button from user)
 // WebSocket xử lý streaming video
 wsServer.on("connection", (ws, req) => {
   console.log("Connected");
   ws.binaryType = "arraybuffer";
   connectedClients.push(ws);
 
-<<<<<<< HEAD
-  if (!currentFolderName) {
-    // Tạo folder mới nếu chưa có
-    currentFolderName = generateNewFolder();
-    createDirectory(path.join(__dirname, currentFolderName));
-  }
-
-  ws.on("message", (data) => {
-=======
   if (!currentFolderName && !isEmergency) {
     startRecording(); // Bắt đầu ghi khi có kết nối nếu không phải tình huống khẩn cấp
   }
@@ -112,7 +86,6 @@ wsServer.on("connection", (ws, req) => {
       videoBuffer.shift(); // Xóa phần tử cũ nhất nếu vượt quá giới hạn
     }
 
->>>>>>> f1aae78 (Upgrade with press button from user)
     connectedClients.forEach((ws, i) => {
       if (ws.readyState === ws.OPEN) {
         ws.send(data);
@@ -144,15 +117,9 @@ app.listen(HTTP_PORT, () =>
   console.log(`HTTP server listening at ${HTTP_PORT}`)
 );
 
-<<<<<<< HEAD
-// Function to handle the upload process (Every 1 minute)
-function handleUpload() {
-  if (isUploading || !currentFolderName) return; // Kiểm tra nếu đang upload hoặc chưa có folder
-=======
 // Function to handle the upload process
 function handleUploadAndDeletion() {
   if (isUploading || !currentFolderName || isEmergency) return; // Không upload khi đang xử lý khẩn cấp
->>>>>>> f1aae78 (Upgrade with press button from user)
 
   const folderPath = path.join(__dirname, currentFolderName);
   const videoFile = path.join(folderPath, "video_stream.mp4");
@@ -189,16 +156,12 @@ function handleUploadAndDeletion() {
             console.log(
               `Video from folder ${currentFolderName} uploaded successfully`
             );
-<<<<<<< HEAD
-            isUploading = false;
-=======
             // Đặt lại biến currentFolderName để tạo folder mới cho lần streaming tiếp theo
             currentFolderName = "";
             isUploading = false;
             if (!isEmergency) {
               startRecording(); // Tiếp tục ghi khi không có yêu cầu khẩn cấp
             }
->>>>>>> f1aae78 (Upgrade with press button from user)
           });
       })
       .on("error", function (err) {
@@ -209,51 +172,6 @@ function handleUploadAndDeletion() {
   }
 }
 
-<<<<<<< HEAD
-// Function to handle the deletion of the oldest folder (Every 10 minutes)
-function handleDeleteOldestFolder() {
-  fs.readdir(__dirname, (err, folders) => {
-    if (err) {
-      console.error("Error reading directories:", err);
-      return;
-    }
-
-    // Lọc chỉ các thư mục chứa video
-    const videoFolders = folders.filter((folder) =>
-      folder.startsWith("video_")
-    );
-
-    if (videoFolders.length > 0) {
-      // Sắp xếp thư mục theo thời gian tạo (cũ nhất trước)
-      const oldestFolder = videoFolders.sort()[0];
-      const folderPath = path.join(__dirname, oldestFolder);
-
-      // Xóa thư mục cũ nhất
-      fs.rm(folderPath, { recursive: true }, (err) => {
-        if (err) {
-          console.error("Error deleting folder:", err);
-        } else {
-          console.log(`Oldest folder ${oldestFolder} deleted.`);
-        }
-      });
-    } else {
-      console.log("No video folders to delete.");
-    }
-  });
-}
-
-// Sử dụng cron để chạy upload mỗi 1 phút
-cron.schedule("*/1 * * * *", () => {
-  console.log("Checking for video upload...");
-  handleUpload();
-});
-
-// Sử dụng cron để chạy xóa thư mục cũ nhất mỗi 10 phút
-cron.schedule("*/10 * * * *", () => {
-  console.log("Checking for folder deletion...");
-  handleDeleteOldestFolder();
-});
-=======
 // Function để trích xuất video từ buffer
 function extractVideo() {
   console.log("Extracting video...");
@@ -363,4 +281,3 @@ function deleteOldestVideo() {
     });
   });
 }
->>>>>>> f1aae78 (Upgrade with press button from user)
