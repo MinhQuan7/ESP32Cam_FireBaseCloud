@@ -14,6 +14,7 @@
         padding: 5px;
         font-family: Arial, sans-serif;
         font-size: 14px;
+        margin-top: 50px;
       }
 
       img {
@@ -33,7 +34,9 @@
     <script>
       const img = document.querySelector("img");
       const datetime = document.getElementById("datetime");
-      const WS_URL = "ws://192.168.1.16:8888";
+
+      //_______________________Must change________________________
+      const WS_URL = "ws://192.168.1.16:8888"; //must change
       const ws = new WebSocket(WS_URL);
       let urlObject;
 
@@ -47,7 +50,6 @@
         urlObject = URL.createObjectURL(new Blob([arrayBuffer]));
         img.src = urlObject;
       };
-
       // Function to update the date and time every second
       function updateDateTime() {
         const now = new Date();
@@ -69,42 +71,54 @@
       setInterval(updateDateTime, 1000);
     </script>
 
-    
-    /*_____________________ERa configuration________________*/
-    <script src="https://www.unpkg.com/@eohjsc/era-widget@1.1.3/src/index.js"></script>
+  
+    <!-- <script src="https://www.unpkg.com/@eohjsc/era-widget@1.1.3/src/index.js"></script>
     <script>
+      //____________________E-Ra Configurations__________________________
       let lastextractVideos = null;
       const eraWidget = new EraWidget();
-      let config = { id: 51152 }; //Change id with each widget
-      let extractVideoValue = null; 
+      let config = { id: 55477 }; //Change id with each widget
+      let extractVideoValue = null;
 
       eraWidget.onConfiguration((configuration) => {
-          console.log("Full configuration received:", configuration);
-          console.log("Using configuration for extractVideoValue with ID:", config.id);
+        console.log("Full configuration received:", configuration);
+        console.log(
+          "Using configuration for extractVideoValue with ID:",
+          config.id
+        );
       });
 
       eraWidget.onValues((values) => {
         console.log("Received values:", values);
         if (values[config.id]) {
           extractVideoValue = values[config.id].value;
-            console.log("Received extractVideoValue:", extractVideoValue);
+          console.log("Received extractVideoValue:", extractVideoValue);
 
-            if (extractVideoValue === 0 && lastextractVideos !== 0) {
-                console.log("Request extract videos. Loading...");
+          if (extractVideoValue === 0 && lastextractVideos !== 0) {
+            console.log("Request extract videos. Loading...");
 
-                //_________________________________________________________________
-                //______________Supply videos from streaming Websocket_____________________
-                
+            // Gọi API từ client tới server để trích xuất video
+            fetch("/extractVideo")
+              .then(response => response.json()) //Xử lý phản hồi 
+              .then(data => console.log(data.message)) //Xử lý dữ liệu phản hổi 
+              .catch(error => console.error("Error extracting video:", error)); //Xử lý lỗi 
+          }
 
-            }
-
-            lastextractVideos = extractVideoValue;
+          lastextractVideos = extractVideoValue;
         } else {
-            console.log("No valid values received for extractVideoValue with ID:", config.id);
+          console.log(
+            "No valid values received for extractVideoValue with ID:",
+            config.id
+          );
         }
-    });
-    eraWidget.ready();
+      });
+      eraWidget.ready();
+    </script> -->
 
-    </script>
+
+    //_____________________Extract Videos : Listen request from Client____________
+     
   </body>
+</html>
+
 </html>
