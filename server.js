@@ -172,7 +172,7 @@ function handleUploadAndDeletion() {
   }
 }
 
-//______________________New version for optimize extractVideo_______________________
+//______________________New version for optimize extractVideo________________________
 function extractVideo() {
   console.log("Extracting video...");
 
