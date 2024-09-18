@@ -6,7 +6,11 @@ const firebase = require("firebase-admin");
 const cron = require("node-cron");
 const ffmpeg = require("fluent-ffmpeg");
 
-const ffmpegPath = "C:/Users/QuanLe/ffmpeg-7.0.2-essentials_build/bin/ffmpeg.exe"; // Đường dẫn tới ffmpeg
+//uuidv4 là lib giúp generate ra access token để xem videos
+const { v4: uuidv4 } = require("uuid");
+
+const ffmpegPath =
+  "C:/Users/QuanLe/ffmpeg-7.0.2-essentials_build/bin/ffmpeg.exe";
 ffmpeg.setFfmpegPath(ffmpegPath); // Cấu hình đường dẫn ffmpeg
 
 const app = express();
@@ -20,7 +24,7 @@ const wsServer = new WebSocket.Server({ port: WS_PORT }, () =>
 
 // Initialize Firebase
 firebase.initializeApp({
-  credential: firebase.credential.cert(require("./key.json")), // Đảm bảo đường dẫn đúng tới key Firebase
+  credential: firebase.credential.cert(require("./key.json")),
   storageBucket: "esp32cam-4dbf9.appspot.com",
 });
 const bucket = firebase.storage().bucket();
@@ -30,7 +34,7 @@ let currentFolderName = ""; // Folder hiện tại để lưu video
 let isUploading = false; // Kiểm tra trạng thái upload
 let recordingTimeout = null; // Để kiểm soát thời gian ghi
 let videoBuffer = []; // Buffer để lưu dữ liệu video (dùng để trích xuất)
-const bufferLimit = 10 * 30; // Giới hạn buffer lưu 10 giây (30 frames/giây)
+const bufferLimit = 32 * 20; // Giới hạn buffer lưu 30 giây (20 frames/giây)
 
 let isEmergency = false; // Biến đánh dấu khi có yêu cầu khẩn cấp
 
@@ -68,42 +72,41 @@ function stopRecording() {
   handleUploadAndDeletion();
 }
 
-// WebSocket xử lý streaming video
+//_____________ WebSocket xử lý streaming video________________
 wsServer.on("connection", (ws, req) => {
   console.log("Connected");
   ws.binaryType = "arraybuffer";
   connectedClients.push(ws);
 
-  //______________Đoạn xử lý ưu tiên ghi videos khi press button_______________
+  //______________Ưu tiên ghi videos khi nhận tín hiệu khẩn cấp_______________
   if (!currentFolderName && !isEmergency) {
-    startRecording(); // Bắt đầu ghi khi có kết nối nếu không phải tình huống khẩn cấp
+    startRecording(); // Bắt đầu ghi nếu không phải tình huống khẩn cấp
   }
-
   ws.on("message", (data) => {
-    if (isEmergency) return; // Bỏ qua dữ liệu thông thường nếu đang trong tình huống khẩn cấp
+    // Khi isEmergency, bỏ qua ghi video nhưng vẫn tiếp tục streaming
+    if (!isEmergency) {
+      // Thêm dữ liệu vào buffer (lưu 10 giây trước)
+      videoBuffer.push(data);
+      if (videoBuffer.length > bufferLimit) {
+        videoBuffer.shift(); // Xóa phần tử cũ nhất nếu vượt quá giới hạn
+      }
 
-    // Thêm dữ liệu vào buffer (lưu 10 giây trước)
-    videoBuffer.push(data);
-    if (videoBuffer.length > bufferLimit) {
-      videoBuffer.shift(); // Xóa phần tử cũ nhất nếu vượt quá giới hạn
+      // Ghi dữ liệu stream vào file mới trong thư mục
+      const bufferData = Buffer.from(data);
+      const videoFilePath = path.join(
+        __dirname,
+        currentFolderName,
+        `video_stream.mp4`
+      );
+      const writeStream = fs.createWriteStream(videoFilePath, { flags: "a" });
+      writeStream.write(bufferData);
+      writeStream.end();
     }
 
+    // Luôn thực hiện việc truyền dữ liệu qua WebSocket (streaming)
     connectedClients.forEach((ws, i) => {
       if (ws.readyState === ws.OPEN) {
         ws.send(data);
-
-        // Chuyển đổi ArrayBuffer thành Buffer
-        const bufferData = Buffer.from(data);
-
-        // Ghi dữ liệu stream vào file mới trong thư mục
-        const videoFilePath = path.join(
-          __dirname,
-          currentFolderName,
-          `video_stream.mp4`
-        );
-        const writeStream = fs.createWriteStream(videoFilePath, { flags: "a" });
-        writeStream.write(bufferData);
-        writeStream.end();
       } else {
         connectedClients.splice(i, 1);
       }
@@ -119,25 +122,22 @@ app.listen(HTTP_PORT, () =>
   console.log(`HTTP server listening at ${HTTP_PORT}`)
 );
 
-// Function to handle the upload process
+// Xử lý upload video sau khi dừng ghi
 function handleUploadAndDeletion() {
-  if (isUploading || !currentFolderName || isEmergency) return; // Không upload khi đang xử lý khẩn cấp
+  if (isUploading || !currentFolderName || isEmergency) return;
 
   const folderPath = path.join(__dirname, currentFolderName);
   const videoFile = path.join(folderPath, "video_stream.mp4");
 
-  // Kiểm tra xem file video có tồn tại không
   if (fs.existsSync(videoFile)) {
-    isUploading = true; // Đặt trạng thái upload là true
+    isUploading = true;
 
-    // Xử lý video qua ffmpeg để đảm bảo video hợp lệ
     const processedFile = path.join(folderPath, `processed_video.mp4`);
     ffmpeg(videoFile)
       .output(processedFile)
       .on("end", function () {
         console.log("File processed successfully, ready for upload.");
 
-        // Upload video đã xử lý lên Firebase
         const blob = bucket.file(
           `videos/${currentFolderName}_${Date.now()}.mp4`
         );
@@ -147,34 +147,32 @@ function handleUploadAndDeletion() {
           },
         });
 
-        // Đọc file đã xử lý và upload lên Firebase
         fs.createReadStream(processedFile)
           .pipe(blobStream)
           .on("error", (err) => {
             console.log("Error uploading video:", err);
-            isUploading = false; // Đặt lại trạng thái
+            isUploading = false;
           })
           .on("finish", () => {
             console.log(
               `Video from folder ${currentFolderName} uploaded successfully`
             );
-            // Đặt lại biến currentFolderName để tạo folder mới cho lần streaming tiếp theo
             currentFolderName = "";
             isUploading = false;
             if (!isEmergency) {
-              startRecording(); // Tiếp tục ghi khi không có yêu cầu khẩn cấp
+              startRecording();
             }
           });
       })
       .on("error", function (err) {
         console.log("Error processing video with ffmpeg:", err.message);
-        isUploading = false; // Đặt lại trạng thái
+        isUploading = false;
       })
-      .run(); // Bắt đầu xử lý video bằng ffmpeg
+      .run();
   }
 }
 
-// ____________Function để trích xuất video từ buffer_______________________
+//______________________New version for optimize extractVideo_______________________
 function extractVideo() {
   console.log("Extracting video...");
 
@@ -189,26 +187,49 @@ function extractVideo() {
   const writeStream = fs.createWriteStream(videoFilePath);
 
   // Ghi buffer (10 giây trước khi bấm nút)
-  videoBuffer.forEach((frame) => {
+  const tenSecondsBefore = videoBuffer.slice(-10 * 30); // 10 giây trước khi bấm (30 frame/giây)
+
+  console.log(
+    `Số lượng frames trong buffer trước khi trích xuất: ${tenSecondsBefore.length}`
+  );
+
+  tenSecondsBefore.forEach((frame, index) => {
+    console.log(`Ghi frame ${index} (10 giây trước) vào video`);
     writeStream.write(Buffer.from(frame));
   });
 
-  // Ghi thêm dữ liệu 10 giây sau khi bấm nút
-  setTimeout(() => {
-    stopRecording(); // Ngừng ghi video chính sau 10 giây
-    writeStream.end();
-    console.log("Video extraction completed.");
+  // Bắt đầu ghi dữ liệu sau khi bấm nút
+  const startTime = Date.now();
+  console.log("Start record videos after press button");
+  const recordAfterPress = setInterval(() => {
+    if (Date.now() - startTime > 30000) {
+      // Sau 30 giây kể từ khi bấm
+      clearInterval(recordAfterPress);
 
-    // Upload video trích xuất lên Firebase
-    processAndUploadVideo(folderPath, `extracted_video.mp4`);
+      stopRecording(); // Ngừng ghi video chính sau 30 giây
+      console.log("Stop Recording videos after 30s");
+      writeStream.end();
 
-    // Sau khi hoàn thành, tiếp tục quy trình ghi thông thường
-    isEmergency = false;
-    startRecording();
-  }, 10000);
+      console.log("Video extraction completed.");
+
+      // Upload video trích xuất lên Firebase
+      processAndUploadVideo(folderPath, `extracted_video.mp4`);
+
+      // Sau khi hoàn thành, tiếp tục quy trình ghi thông thường
+      isEmergency = false;
+      startRecording();
+    } else {
+      // Ghi thêm dữ liệu đang stream sau khi bấm nút
+      if (videoBuffer.length > 0) {
+        const frame = videoBuffer.shift(); // Lấy khung hình mới từ buffer
+        writeStream.write(Buffer.from(frame));
+      }
+    }
+  }, 1000 / 20); // Ghi 20 khung hình mỗi giây
 }
 
-//Function to handle video upload after extraction
+//_____________________________End extract Videos______________________
+// Upload video sau khi trích xuất
 function processAndUploadVideo(folderPath, videoFileName) {
   const videoFile = path.join(folderPath, videoFileName);
   const processedFile = path.join(folderPath, `processed_${videoFileName}`);
@@ -217,12 +238,29 @@ function processAndUploadVideo(folderPath, videoFileName) {
     .output(processedFile)
     .on("end", function () {
       console.log("File processed successfully, ready for upload.");
-      const blob = bucket.file(`videos/${folderPath}_${Date.now()}.mp4`);
-      const blobStream = blob.createWriteStream({ metadata: { contentType: "video/mp4" } });
+      const blob = bucket.file(`videos/${processedFile}_${Date.now()}.mp4`);
+
+      // Tạo access token
+      const options = {
+        metadata: {
+          contentType: "video/mp4",
+          // Cấp access token để xem video
+          metadata: {
+            firebaseStorageDownloadTokens: uuidv4(), // Sử dụng thư viện uuid để tạo token duy nhất
+          },
+        },
+      };
+
+      // Upload video lên Firebase
+      const blobStream = blob.createWriteStream(options);
       fs.createReadStream(processedFile)
         .pipe(blobStream)
-        .on("error", (err) => console.log("Error uploading video:", err))
-        .on("finish", () => console.log(`Video from ${folderPath} uploaded successfully`));
+        .on("error", (err) => {
+          console.log("Error uploading video:", err);
+        })
+        .on("finish", () => {
+          console.log(`Video from ${processedFile} uploaded successfully`);
+        });
     })
     .on("error", function (err) {
       console.log("Error processing video with ffmpeg:", err.message);
@@ -230,19 +268,15 @@ function processAndUploadVideo(folderPath, videoFileName) {
     .run();
 }
 
-//___________Xử lý khi bấm nút từ phía client__________________
-// API để xử lý khi bấm nút từ phía client
-// Xử lý khi ESP32 Cam gửi yêu cầu
+// Xử lý khi ESP32 Cam gửi yêu cầu (ưu tiên trích xuất)
 app.get("/esp32Capture", (req, res) => {
   console.log("Received capture request from ESP32 Cam");
-  
-  // Gửi tín hiệu yêu cầu chụp hình tới WebSocket
-  broadcastToClients({ type: "capture", message: "Capture requested from ESP32 Cam" });
-
+  // Ngay lập tức ưu tiên trích xuất video (10 giây trước và sau)
+  extractVideo();
   res.send("Capture request received");
 });
 
-// Function để phát tín hiệu tới tất cả client kết nối qua WebSocket
+// Phát tín hiệu tới tất cả client qua WebSocket
 function broadcastToClients(data) {
   connectedClients.forEach((ws) => {
     if (ws.readyState === ws.OPEN) {
@@ -251,20 +285,12 @@ function broadcastToClients(data) {
   });
 }
 
-
-// // Sử dụng cron để upload video mỗi phút
-// cron.schedule("*/2 * * * *", () => {
-//   console.log("Checking for video upload...");
-//   handleUploadAndDeletion();
-// });
-
-// Sử dụng cron để xóa video cũ nhất mỗi 10 phút
+// Cron xóa video cũ nhất mỗi 10 phút
 cron.schedule("*/10 * * * *", () => {
   console.log("Deleting oldest video...");
   deleteOldestVideo();
 });
 
-// Function to delete the oldest video
 function deleteOldestVideo() {
   const videoDir = __dirname;
 
